@@ -1,0 +1,13 @@
+STAKEHOLDER,RACI,POWER/INFLUENCE,URGENCY,INTEREST,RISK/REWARD,CURRENT STATUS,TIER,INFLUENCES,INFLUENCED BY
+Sarah C (VP Product),Accountable,5,5,4,Risk: Delay; Reward: Market lead,Champion,Core,Elena R (PM),
+Marcus V (Lead Arch),Responsible,4,5,3,Risk: Tech debt; Reward: Scalability,Champion,Core,Elena R (PM),Maria C (CFO)
+Elena R (PM),Responsible,3,5,2,Risk: Scope creep; Reward: On-time delivery,Indifferent,Satellite,Marcus V (Lead Arch),Maria C (CFO)
+David K (Eng Dir),Consulted,2,5,1,Risk: Resource drain; Reward: Tech adoption,Champion,Satellite,Marcus V (Lead Arch),Maria C (CFO)
+Legal Counsel,Consulted,2,5,1,Risk: Compliance breach; Reward: Risk mitigation,Blocking,Core,,Marcus V (Lead Arch)
+Procurement Head,Informed,1,4,1,Risk: Budget overrun; Reward: Cost efficiency,Indifferent,Core,,Marcus V (Lead Arch)
+Cloud Vendor,Informed,5,1,5,Risk: Churn; Reward: Contract renewal,Indifferent,Satellite,,Elena R (PM)
+Maria C (CFO),Accountable,5,4,5,Risk: budget overrun; Reward: cost savings,Champion,Core,Sam P (VP Eng);Jordan L (PM),Marcus V (Lead Arch)
+Sam P (VP Eng),Responsible,4,3,4,Risk: timeline slip; Reward: promotion,Indifferent,Core,Jordan L (PM),Maria C (CFO); Elena R (PM)
+Jordan L (PM),Responsible,3,5,3,Risk: scope creep; Reward: shipped feature,Skeptical,Core,Marcus V (Lead Arch),Maria C (CFO);Sam P (VP Eng)
+Alex R (Legal),Consulted,2,2,2,Risk: compliance exposure; Reward: none,Blocking,Satellite,Sarah C (VP Product),Maria C (CFO)
+Priya N (Client Sponsor),Informed,4,3,5,Risk: vendor delay; Reward: on-time launch,Champion,Satellite,Maria C (CFO),Maria C (CFO); Sarah C (VP Product)
