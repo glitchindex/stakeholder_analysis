@@ -1,4 +1,4 @@
-STAKEHOLDER,RACI,POWER/INFLUENCE,URGENCY,INTEREST,RISK/REWARD,CURRENT STATUS,TIER,INFLUENCES,INFLUENCED BY
+STAKEHOLDER,RACI,POWER/INFLUENCE,URGENCY,INTEREST,RISK/REWARD,STANCE,TIER,INFLUENCES,INFLUENCED BY
 Sarah C (VP Product),Accountable,5,5,4,Risk: Delay; Reward: Market lead,Champion,Core,Elena R (PM),
 Marcus V (Lead Arch),Responsible,4,5,3,Risk: Tech debt; Reward: Scalability,Champion,Core,Elena R (PM),Maria C (CFO)
 Elena R (PM),Responsible,3,5,2,Risk: Scope creep; Reward: On-time delivery,Indifferent,Satellite,Marcus V (Lead Arch),Maria C (CFO)
