@@ -1,7 +1,7 @@
 """
 Stakeholder relationship mapping.
 
-Expects a CSV (Line 129 - format available on GitHub /glitchindex) with these columns (header text is matched flexibly, but
+Expects a CSV with these columns (header text is matched flexibly, but
 each field is identified by whole-word tokens so similarly-named columns
 - e.g. POWER/INFLUENCE vs INFLUENCES vs INFLUENCED BY - never collide):
 
@@ -31,13 +31,16 @@ import re
 import warnings
 
 import matplotlib.lines as mlines
-import matplotlib.patches as mpatches
+import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 import pandas as pd
+from matplotlib.patches import Circle
 
-### Visual Encoding
+# --- Visual encoding lookup tables -----------------------------------------
 
+BACKGROUND = "#F7F8FA"
 TIER_COLORS = {"Core": "#FF0055", "Satellite": "#006B7B"}
 DEFAULT_TIER = "Core"
 
@@ -62,7 +65,7 @@ POWER_SIZE_MIN, POWER_SIZE_MAX = 700, 2900
 HALO_MIN, HALO_MAX = 0, 2400
 
 
-### Detection/Formatting
+#### Column detection 
 
 def _tokens(col):
     cleaned = col.strip().strip("\ufeff").upper()
@@ -70,7 +73,7 @@ def _tokens(col):
 
 
 def _find_column(df, token_sets, exclude_tokens=None, label="column"):
-    
+  
     exclude_tokens = exclude_tokens or set()
     for col in df.columns:
         tokens = _tokens(col)
@@ -93,6 +96,8 @@ def _split_names(value):
 
 
 def _match_node(name, node_names, context=""):
+    """Exact (case-insensitive) match first; substring fallback only when
+    unambiguous, and never silent."""
     if not name:
         return None
     lower_map = {n.lower(): n for n in node_names}
@@ -124,11 +129,26 @@ def _scaled(value, low=1, high=5, out_min=0, out_max=1):
     return out_min + (value - low) / (high - low) * (out_max - out_min)
 
 
-### Main Body
+#### Main 
+
+def _detect_header_row(csv_file):
+    """Find the first row that isn't entirely blank, so stray leading blank
+    lines (common when a sheet is exported with a title row or spacer)
+    don't get mistaken for the header."""
+    raw = pd.read_csv(csv_file, header=None, encoding="utf-8-sig", dtype=str)
+    for i, row in raw.iterrows():
+        non_empty = row.dropna().astype(str).str.strip()
+        if (non_empty != "").any():
+            return i
+    return 0
+
 
 def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholder_network.png"):
     try:
-        df = pd.read_csv(csv_file, sep=",", encoding="utf-8-sig")
+        header_row = _detect_header_row(csv_file)
+        if header_row > 0:
+            print(f"Note: skipped {header_row} blank leading row(s); using row {header_row} as the header.")
+        df = pd.read_csv(csv_file, sep=",", encoding="utf-8-sig", header=header_row)
     except Exception as e:
         print(f"Error reading CSV: {e}")
         return
@@ -143,12 +163,26 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
     col_power = _find_column(df, [{"POWER"}], label="power/influence")
     col_urgency = _find_column(df, [{"URGENCY"}], label="urgency")
     col_interest = _find_column(df, [{"INTEREST"}], label="interest")
-    col_stance = _find_column(df, [{"STANCE"}, {"SUPPORT"}], label="stance")
+    col_stance = _find_column(df, [{"STANCE"}, {"SUPPORT"}, {"CURRENT", "STATUS"}], label="stance")
     col_tier = _find_column(df, [{"TIER"}, {"RING"}], label="tier")
     col_influences = _find_column(df, [{"INFLUENCES"}], exclude_tokens={"BY"}, label="influences (outgoing)")
     col_influenced_by = _find_column(df, [{"INFLUENCED", "BY"}], label="influenced by (incoming)")
 
+    
+    print("Column detection:")
+    print(f"  Stakeholder name -> {col_name}")
+    print(f"  RACI             -> {col_raci or f'NOT FOUND - every stakeholder will default to {DEFAULT_RACI!r}'}")
+    print(f"  Power/Influence  -> {col_power or 'NOT FOUND - every stakeholder will default to 3'}")
+    print(f"  Urgency          -> {col_urgency or 'NOT FOUND - every stakeholder will default to 3'}")
+    print(f"  Interest         -> {col_interest or 'NOT FOUND - every stakeholder will default to 3'}")
+    print(f"  Stance           -> {col_stance or f'NOT FOUND - every stakeholder will default to {DEFAULT_STANCE!r}'}")
+    print(f"  Tier             -> {col_tier or f'NOT FOUND - every stakeholder will default to {DEFAULT_TIER!r}'}")
+    print(f"  Influences       -> {col_influences or 'NOT FOUND - no outgoing edges will be added'}")
+    print(f"  Influenced By    -> {col_influenced_by or 'NOT FOUND - no incoming edges will be added'}")
+    print()
+
     # 1. Nodes
+    unrecognized = {"tier": set(), "raci": set(), "stance": set()}
     G = nx.DiGraph()
     for _, row in df.iterrows():
         name = str(row[col_name]).strip()
@@ -159,6 +193,13 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
         raci = str(row[col_raci]).strip().title() if col_raci else DEFAULT_RACI
         stance = str(row[col_stance]).strip().title() if col_stance else DEFAULT_STANCE
 
+        if col_tier and tier not in TIER_COLORS:
+            unrecognized["tier"].add(tier)
+        if col_raci and raci not in RACI_STYLES:
+            unrecognized["raci"].add(raci)
+        if col_stance and stance not in STANCE_MARKERS:
+            unrecognized["stance"].add(stance)
+
         G.add_node(
             name,
             tier=tier if tier in TIER_COLORS else DEFAULT_TIER,
@@ -168,13 +209,22 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
             urgency=_to_scale(row[col_urgency]) if col_urgency else 3,
             interest=_to_scale(row[col_interest]) if col_interest else 3,
         )
+    if unrecognized["tier"]:
+        print(f"Warning: TIER values not recognized (defaulted to {DEFAULT_TIER!r}): "
+              f"{sorted(unrecognized['tier'])}. Expected one of: {list(TIER_COLORS)}")
+    if unrecognized["raci"]:
+        print(f"Warning: RACI values not recognized (defaulted to {DEFAULT_RACI!r}): "
+              f"{sorted(unrecognized['raci'])}. Expected one of: {list(RACI_STYLES)}")
+    if unrecognized["stance"]:
+        print(f"Warning: STANCE values not recognized (defaulted to {DEFAULT_STANCE!r}): "
+              f"{sorted(unrecognized['stance'])}. Expected one of: {list(STANCE_MARKERS)}")
 
     node_names = list(G.nodes())
     if not node_names:
         print("No stakeholders found - aborting.")
         return
 
-    # 2. Edges - direction comes straight from the data, no inference required
+    # 2. Edges 
     influences_map, influenced_by_map = {}, {}
     for _, row in df.iterrows():
         source = str(row[col_name]).strip()
@@ -197,7 +247,7 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
                     influenced_by_map[source].add(t)
                     G.add_edge(t, source)
 
-    # 3. Consistency check - the two columns are filled in independently by different people/rows and can drift out of sync - handled by flagging.
+    # 3. Consistency check
     if col_influences and col_influenced_by:
         for person, targets in influences_map.items():
             for target in targets:
@@ -207,7 +257,7 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
                         f"INFLUENCED BY doesn't list {person} - confirm this is intentional."
                     )
 
-    # 4. Layout - concentric shells by tier
+    # 4. Layout 
     core_nodes = [n for n, d in G.nodes(data=True) if d["tier"] == "Core"]
     satellite_nodes = [n for n, d in G.nodes(data=True) if d["tier"] != "Core"]
     if not core_nodes or not satellite_nodes:
@@ -216,8 +266,18 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
         pos = nx.shell_layout(G, nlist=[core_nodes, satellite_nodes])
 
     # 5. Render
-    fig = plt.figure(figsize=(15, 12), dpi=300)
+    fig = plt.figure(figsize=(15, 12), dpi=300, facecolor=BACKGROUND)
     ax = plt.gca()
+    ax.set_facecolor(BACKGROUND)
+
+    for tier_nodes, tier in [(core_nodes, "Core"), (satellite_nodes, "Satellite")]:
+        if not tier_nodes:
+            continue
+        radius = np.mean([np.hypot(*pos[n]) for n in tier_nodes])
+        if radius > 0:
+            ax.add_patch(Circle((0, 0), radius, fill=False, linestyle="--",
+                                 linewidth=1, edgecolor=TIER_COLORS[tier],
+                                 alpha=0.25, zorder=0))
 
     # Group by stance since marker shape is set per draw call, not per node
     by_stance = {}
@@ -225,7 +285,7 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
         by_stance.setdefault(G.nodes[n]["stance"], []).append(n)
 
     for stance, nodelist in by_stance.items():
-        marker = STANCE_MARKERS.get(stance, DEFAULT_STANCE)
+        marker = STANCE_MARKERS.get(stance, STANCE_MARKERS[DEFAULT_STANCE])
         colors = [TIER_COLORS[G.nodes[n]["tier"]] for n in nodelist]
         sizes = [
             POWER_SIZE_MIN + _scaled(G.nodes[n]["power"], out_max=1) * (POWER_SIZE_MAX - POWER_SIZE_MIN)
@@ -262,10 +322,16 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
     )
 
     labels = {n: n.replace(" (", "\n(") for n in G.nodes()}
-    nx.draw_networkx_labels(G, pos, labels=labels, font_size=7, font_weight="bold",
-                             font_color="#111827", ax=ax)
+    label_artists = nx.draw_networkx_labels(G, pos, labels=labels, font_size=7.5,
+                                             font_weight="bold", font_color="#111827", ax=ax)
+    for text in label_artists.values():
+        text.set_path_effects([pe.withStroke(linewidth=3, foreground="white", alpha=0.85)])
+        text.set_zorder(4)
 
-    ### Legend
+    #### Legend 
+    legend_style = dict(fontsize=7.5, title_fontsize=8.5, framealpha=0.92,
+                         fancybox=True, edgecolor="#CBD5E1", borderpad=0.9, labelspacing=0.6)
+
     tier_handles = [
         mlines.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=11, label=t)
         for t, c in TIER_COLORS.items()
@@ -278,27 +344,30 @@ def generate_stakeholder_map(csv_file="stakeholders.csv", output_img="stakeholde
         mlines.Line2D([0], [0], color="#334155", linestyle=ls, linewidth=lw, label=r)
         for r, (ls, lw) in RACI_STYLES.items()
     ]
-    misc_handles = [
-        mpatches.Patch(color="none", label="Size = Power/Influence (1-5)"),
-        mpatches.Patch(color="none", label="Halo size = Interest (1-5)"),
-        mpatches.Patch(color="none", label="Border color = Urgency (pale->red)"),
-    ]
 
     legend1 = ax.legend(handles=tier_handles + stance_handles, loc="upper left",
-                         title="Tier / Stance", fontsize=7, title_fontsize=8, framealpha=0.9)
+                         title="Tier / Stance", **legend_style)
     ax.add_artist(legend1)
-    legend2 = ax.legend(handles=raci_handles, loc="lower left",
-                         title="RACI (border style)", fontsize=7, title_fontsize=8, framealpha=0.9)
-    ax.add_artist(legend2)
-    ax.legend(handles=misc_handles, loc="lower right", fontsize=7, framealpha=0.9,
-              handlelength=0, handletextpad=0)
+    ax.legend(handles=raci_handles, loc="lower left", title="RACI (border style)", **legend_style)
 
-    plt.title("Stakeholder Influence Network", fontsize=14, fontweight="bold", pad=20)
+    ax.text(
+        0.99, 0.01,
+        "Node size = Power/Influence   •   Halo = Interest   •   Border color = Urgency (pale \u2192 red)",
+        transform=ax.transAxes, ha="right", va="bottom", fontsize=7.5, color="#475569",
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="#CBD5E1", alpha=0.92),
+    )
+
+    ax.text(0.5, 1.06, f"{len(G.nodes())} stakeholders  •  {len(G.edges())} relationships",
+            transform=ax.transAxes, ha="center", va="bottom", fontsize=9.5,
+            color="#64748B", style="italic")
+    plt.title("Stakeholder Influence Network", fontsize=17, fontweight="bold",
+              color="#0F172A", pad=28)
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(output_img, bbox_inches="tight")
+    plt.savefig(output_img, bbox_inches="tight", facecolor=BACKGROUND)
     print(f"Network graph generated and saved to {output_img}")
     plt.close(fig)
+
 
 
 if __name__ == "__main__":
